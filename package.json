@@ -11,7 +11,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc -build && node scripts/build-cli.js",
-    "dev": "tsx watch scripts/start-server.ts"
+    "dev": "tsx watch scripts/start-server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "bin": {
     "notion-mcp-server": "bin/cli.mjs"
