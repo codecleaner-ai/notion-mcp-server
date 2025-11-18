@@ -1,0 +1,201 @@
+# Instructions for Cloud Build to build and deploy the Notion MCP Server
+# Service Account: Uses cicd-notion-mcp-server service account (created by build-gcp-resources-notion-mcp.sh)
+serviceAccount: projects/${PROJECT_ID}/serviceAccounts/cicd-notion-mcp-server@${PROJECT_ID}.iam.gserviceaccount.com
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+steps:
+  # Step 01: Fetch the secrets needed for Docker build and Cloud Run deployment
+  - name: "gcr.io/cloud-builders/gcloud"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        # GOTCHA: We are using `bash` as the entrypoint
+        # We need to use `$$` to escape the `$` sign in the bash script
+        # In a normal bash script, we would use `$` to refer to a variable
+        # But in the context of Cloud Build, we need to use `$$` instead of `$`
+
+        echo "Starting Step 01: Fetching secrets from Secret Manager..."
+
+        # REPO_NAME: Artifact Registry path
+        export REPO_NAME=$$(gcloud secrets versions access latest --secret=gcp-artifact-registry-${_SERVICE_NAME} | sed 's~https://~~')
+
+        # Set the image name
+        IMAGE_NAME=$${REPO_NAME}/${_SERVICE_NAME}-images
+
+        # Add the `IMAGE_NAME` value to the build_vars.env file
+        echo "IMAGE_NAME=$${IMAGE_NAME}" >> build_vars.env
+
+        # Set the image path
+        DOCKER_IMAGE_PATH=$${IMAGE_NAME}:latest
+
+        # Add the `DOCKER_IMAGE_PATH` value to the build_vars.env file
+        echo "DOCKER_IMAGE_PATH=$${DOCKER_IMAGE_PATH}" >> build_vars.env
+
+        # DEBUG_MODE: Debug flag (from secret)
+        export DEBUG_MODE=$$(gcloud secrets versions access latest --secret=debug-mode-${_SERVICE_NAME})
+        echo "DEBUG_MODE=$$DEBUG_MODE" >> build_vars.env
+
+        # API_VERSION: From Cloud Build substitution
+        echo "API_VERSION=${_API_VERSION}" >> build_vars.env
+
+        # SERVICE_NAME: From Cloud Build substitution
+        echo "SERVICE_NAME=${_SERVICE_NAME}" >> build_vars.env
+
+        # GCP_PROJECT_ID: From secret (optional, may be used for logging)
+        export GCP_PROJECT_ID=$$(gcloud secrets versions access latest --secret=gcp-project-id)
+        echo "GCP_PROJECT_ID=$$GCP_PROJECT_ID" >> build_vars.env
+
+        echo "End of Step 01: Secrets fetched and environment variables set."
+
+  # Step 02: Build the Docker image
+  - name: "gcr.io/cloud-builders/docker"
+    entrypoint: "bash"
+    env:
+      - "COMMIT_SHA=${_COMMIT_SHA}"
+      - "BRANCH_NAME=${BRANCH_NAME}"
+      - "BUILD_ID=${BUILD_ID}"
+      - "PROJECT_ID=${PROJECT_ID}"
+      - "API_VERSION=${_API_VERSION}"
+      - "DOCKER_BUILDKIT=1"
+    args:
+      - "-c"
+      - |
+        echo "Starting Step 02: Building the Docker image..."
+
+        # Load the environment variables from step 1
+        source build_vars.env
+
+        echo "Building Docker image..."
+        echo "Commit SHA: ${_COMMIT_SHA}"
+        echo "Build ID: $${BUILD_ID}"
+        echo "Project ID: $${PROJECT_ID}"
+        echo "Service Name: ${_SERVICE_NAME}"
+        echo "API Version: ${_API_VERSION}"
+        echo "Docker BuildKit: Enabled"
+
+        # Build the Docker image with BuildKit enabled
+        # DOCKER_BUILDKIT=1 enables BuildKit which is required for --mount cache options
+        DOCKER_BUILDKIT=1 docker build -t asia-southeast1-docker.pkg.dev/$${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:${_COMMIT_SHA} \
+          --label version=$${_COMMIT_SHA}-$${BUILD_ID} \
+          --label description="Notion MCP Server built by Cloud Build - commit: ${_COMMIT_SHA}" \
+          .
+
+        # Tag the image as 'latest'
+        echo "Tagging the image with 'latest'"
+        docker tag asia-southeast1-docker.pkg.dev/$${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:${_COMMIT_SHA} \
+          asia-southeast1-docker.pkg.dev/$${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:latest
+
+  # Step 03: Push the Docker image to GCP Artifact Registry - commit SHA tag
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "asia-southeast1-docker.pkg.dev/${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:${_COMMIT_SHA}"
+
+  # Step 04: Push the Docker image to GCP Artifact Registry - latest tag
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "asia-southeast1-docker.pkg.dev/${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:latest"
+
+  # Step 05: Deploy the Docker image to Cloud Run
+  - name: "gcr.io/cloud-builders/gcloud"
+    entrypoint: "bash"
+    env:
+      - "PROJECT_ID=${PROJECT_ID}"
+    args:
+      - "-c"
+      - |
+        echo "Starting Step 05: Deploying Docker image to Cloud Run..."
+
+        # Set variables
+        SERVICE_NAME="${_SERVICE_NAME}-cloud-run-1"
+        DOCKER_IMAGE_PATH="asia-southeast1-docker.pkg.dev/${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:latest"
+        REGION="asia-southeast1"
+        RUNTIME_SA_EMAIL="${_SERVICE_NAME}-runtime-sa@$${PROJECT_ID}.iam.gserviceaccount.com"
+
+        echo "Project ID: $${PROJECT_ID}"
+        echo "Service Name: $${SERVICE_NAME}"
+        echo "Region: $${REGION}"
+        echo "Docker Image Path: $${DOCKER_IMAGE_PATH}"
+        echo "Runtime Service Account: $${RUNTIME_SA_EMAIL}"
+
+        # Define secret names (using PAT naming conventions)
+        DEBUG_MODE_SECRET_NAME="debug-mode-${_SERVICE_NAME}"
+        AUTH_TOKEN_SECRET_NAME="notion-mcp-server-auth-token"
+
+        # Verify image availability for deployment
+        MAX_RETRIES=3
+        WAIT_TIME=60
+        SUCCESS=0
+
+        echo "Verifying image availability for deployment..."
+        for ((i=1; i<=MAX_RETRIES; i++)); do
+          echo "Attempt $${i}: Verifying if image is available at path: $${DOCKER_IMAGE_PATH}"
+          
+          if gcloud artifacts docker images describe $${DOCKER_IMAGE_PATH}; then
+            echo "Image is available for deployment."
+            SUCCESS=1
+            break
+          else
+            echo "Image not yet available. Retrying in $${WAIT_TIME} seconds..."
+            sleep $${WAIT_TIME}
+            WAIT_TIME=$((WAIT_TIME * 2))
+          fi
+        done
+
+        if [[ $${SUCCESS} -ne 1 ]]; then
+          echo "ERROR: Image verification failed after $${MAX_RETRIES} attempts."
+          exit 1
+        fi
+
+        # Deploy the image to Cloud Run
+        # Note: Internal-only service with --allow-unauthenticated (authentication handled at application level)
+        # Sanitize API version for revision suffix: replace dots with hyphens (Cloud Run only allows lowercase, digits, hyphens)
+        REVISION_SUFFIX=$(echo "${_API_VERSION}" | tr '.' '-')
+        gcloud run deploy $${SERVICE_NAME} \
+          --image $${DOCKER_IMAGE_PATH} \
+          --project $${PROJECT_ID} \
+          --region $${REGION} \
+          --platform managed \
+          --allow-unauthenticated \
+          --ingress=internal \
+          --service-account "$${RUNTIME_SA_EMAIL}" \
+          --set-secrets="DEBUG_MODE=$${DEBUG_MODE_SECRET_NAME}:latest,AUTH_TOKEN=$${AUTH_TOKEN_SECRET_NAME}:latest" \
+          --revision-suffix "$${REVISION_SUFFIX}"
+
+        # Check if the deployment was successful
+        if [[ $? -ne 0 ]]; then
+          echo "ERROR: Deployment failed."
+          exit 1
+        else
+          echo "Deployment to Cloud Run was successful."
+        fi
+
+        # Wait 5 seconds before the next step
+        sleep 5
+
+        # Make sure the latest revision serves 100% of the traffic
+        gcloud run services update-traffic $${SERVICE_NAME} \
+          --to-latest \
+          --region $${REGION} \
+          --project $${PROJECT_ID}
+
+        # Check if the update was successful
+        if [[ $? -ne 0 ]]; then
+          echo "ERROR: Traffic update failed."
+          exit 1
+        else
+          echo "Traffic update to the latest revision was successful."
+        fi
+
+images:
+  - "asia-southeast1-docker.pkg.dev/${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:${_COMMIT_SHA}"
+  - "asia-southeast1-docker.pkg.dev/${PROJECT_ID}/${_SERVICE_NAME}/${_SERVICE_NAME}-images:latest"
+
+substitutions:
+  _COMMIT_SHA: "${SHORT_SHA}"
+  _SERVICE_NAME: "notion-mcp-server"
+  _API_VERSION: "v1.9.0"

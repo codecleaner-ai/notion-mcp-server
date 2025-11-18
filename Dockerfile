@@ -31,7 +31,11 @@ COPY --from=builder /usr/local/lib/node_modules/@notionhq/notion-mcp-server /usr
 COPY --from=builder /usr/local/bin/notion-mcp-server /usr/local/bin/notion-mcp-server
 
 # Set default environment variables
-ENV OPENAPI_MCP_HEADERS="{}"
+ENV OPENAPI_MCP_HEADERS="{}" \
+    MULTI_TENANT=true
 
 # Set entrypoint
-ENTRYPOINT ["notion-mcp-server"]
+# CRITICAL: The server ONLY reads --transport and --port from command-line arguments (not from ENV vars)
+# Without these CLI arguments, the server defaults to stdio transport on port 3000, which is wrong for Cloud Run
+# MULTI_TENANT is used by the server code but doesn't need to be passed as a CLI argument
+ENTRYPOINT ["notion-mcp-server", "--transport", "http", "--port", "8080"]

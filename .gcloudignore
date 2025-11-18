@@ -1,0 +1,50 @@
+# .gcloudignore
+# Ignore files as per .gitignore
+.git/
+.gitignore
+
+# Exclude other unnecessary files
+*.log
+*.tmp
+
+# Exclude temporary or log files
+.log
+tmp/
+.tmp
+
+# Exclude tests and documentation if not needed for build
+tests/
+docs/
+
+# Exclude any other files not needed for the image build
+.tgz
+.tar.gz
+
+# Exclude node_modules (will be installed during Docker build)
+node_modules/
+
+# Exclude build artifacts
+build/
+dist/
+bin/
+
+# Exclude cache files
+.cache
+.eslintcache
+.yarn/cache
+
+# Exclude IDE files
+.cursor
+.DS_Store
+
+# Exclude environment files
+.env
+.env.local
+
+# Exclude log files
+logs/
+*.log
+
+# Exclude Docker-related files (not needed in Cloud Build context)
+docker-compose.yml
+
