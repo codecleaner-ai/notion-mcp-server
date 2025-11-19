@@ -219,27 +219,27 @@ export async function startServer(args: string[] = process.argv) {
      */
     return proxy.getServer();
   } else if (transport === "http") {
-  /**
-   * ============================================================================
-   * HTTP TRANSPORT MODE
-   * ============================================================================
-   *
-   * This mode is used by backend services and web applications.
-   * The server exposes HTTP endpoints (/mcp and /health) for remote access.
-   * Requires authentication via bearer token for security.
-   *
-   * How it works:
-   * - Clients make HTTP requests to /mcp endpoint
-   * - Server validates authentication (bearer token)
-   * - Server routes requests to appropriate MCP handler
-   * - Handler processes MCP protocol messages
-   * - Server sends HTTP responses back to clients
-   *
-   * This mode supports:
-   * - Multiple concurrent sessions (multi-tenant)
-   * - Remote access (not just local)
-   * - Integration with backend services
-   */
+    /**
+     * ============================================================================
+     * HTTP TRANSPORT MODE
+     * ============================================================================
+     *
+     * This mode is used by backend services and web applications.
+     * The server exposes HTTP endpoints (/mcp and /health) for remote access.
+     * Requires authentication via bearer token for security.
+     *
+     * How it works:
+     * - Clients make HTTP requests to /mcp endpoint
+     * - Server validates authentication (bearer token)
+     * - Server routes requests to appropriate MCP handler
+     * - Handler processes MCP protocol messages
+     * - Server sends HTTP responses back to clients
+     *
+     * This mode supports:
+     * - Multiple concurrent sessions (multi-tenant)
+     * - Remote access (not just local)
+     * - Integration with backend services
+     */
     /**
      * ============================================================================
      * HTTP SERVER SETUP
@@ -289,7 +289,7 @@ export async function startServer(args: string[] = process.argv) {
      */
     const authToken =
       options.authToken || // Check CLI argument first
-      process.env.AUTH_TOKEN || // Then check environment variable
+      (process.env.AUTH_TOKEN ? process.env.AUTH_TOKEN.trim() : undefined) || // Then check environment variable
       randomBytes(32).toString("hex"); // Finally, generate a secure random token
     /**
      * randomBytes(32) generates 32 bytes (256 bits) of cryptographically secure
@@ -616,18 +616,18 @@ export async function startServer(args: string[] = process.argv) {
      */
     return { close: () => {} };
   } else {
-  /**
-   * ============================================================================
-   * UNSUPPORTED TRANSPORT MODE
-   * ============================================================================
-   *
-   * If transport is neither "stdio" nor "http", throw an error.
-   * This prevents silent failures and clearly indicates configuration issues.
-   *
-   * This should never happen in normal usage because parseArgs() normalizes
-   * transport values to lowercase and defaults to "stdio". However, if someone
-   * manually sets an invalid transport value, we catch it here.
-   */
+    /**
+     * ============================================================================
+     * UNSUPPORTED TRANSPORT MODE
+     * ============================================================================
+     *
+     * If transport is neither "stdio" nor "http", throw an error.
+     * This prevents silent failures and clearly indicates configuration issues.
+     *
+     * This should never happen in normal usage because parseArgs() normalizes
+     * transport values to lowercase and defaults to "stdio". However, if someone
+     * manually sets an invalid transport value, we catch it here.
+     */
     throw new Error(
       `Unsupported transport: ${transport}. Use 'stdio' or 'http'.`
     );
@@ -703,15 +703,15 @@ startServer(process.argv).catch((error) => {
     console.error("Invalid OpenAPI 3.1 specification:");
     error.errors.forEach((err) => console.error(err));
   } else {
-  /**
-   * Case 2: Any other error (network, file system, etc.)
-   *
-   * This handles all other types of errors that might occur during startup:
-   * - File system errors (can't read OpenAPI spec file)
-   * - Network errors (can't bind to port, port already in use)
-   * - Permission errors (can't create log directory)
-   * - Unexpected errors (bugs, etc.)
-   */
+    /**
+     * Case 2: Any other error (network, file system, etc.)
+     *
+     * This handles all other types of errors that might occur during startup:
+     * - File system errors (can't read OpenAPI spec file)
+     * - Network errors (can't bind to port, port already in use)
+     * - Permission errors (can't create log directory)
+     * - Unexpected errors (bugs, etc.)
+     */
     /**
      * Log as critical since server failed to start
      *

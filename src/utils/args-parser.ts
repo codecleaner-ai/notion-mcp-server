@@ -145,7 +145,8 @@ export function parseArgs(args: string[] = process.argv): ServerOptions {
        */
       // Extract the auth token from the next argument
       // Store it as-is (no hashing, no validation)
-      authToken = userArgs[i + 1];
+      // We trim whitespace to handle cases where tokens might have accidental newlines/spaces
+      authToken = userArgs[i + 1].trim();
       // Increment i to skip the token value we just consumed
       i++;
     } else if (userArgs[i] === "--help" || userArgs[i] === "-h") {

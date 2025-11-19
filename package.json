@@ -1,12 +1,12 @@
 {
-  "name": "@notionhq/notion-mcp-server",
+  "name": "@codeleaner-ai/notion-mcp-server",
   "keywords": [
     "notion",
     "api",
     "mcp",
     "server"
   ],
-  "version": "1.9.0",
+  "version": "1.10.4",
   "license": "MIT",
   "type": "module",
   "scripts": {

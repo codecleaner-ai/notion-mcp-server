@@ -1,11 +1,15 @@
 /**
  * Authentication middleware for Notion MCP Server
  *
- * This module provides bearer token authentication for HTTP endpoints.
- * It validates the "Authorization: Bearer <token>" header against the server's token.
+ * This module provides API key authentication for HTTP endpoints.
+ * It validates the "X-API-Key" header against the server's token.
+ *
+ * IMPORTANT: This middleware uses X-API-Key instead of Authorization: Bearer
+ * to allow GCP IAM authentication (which requires Authorization: Bearer) to
+ * coexist with application-level authentication.
  *
  * The middleware:
- * - Extracts the bearer token from the Authorization header
+ * - Extracts the API key from the X-API-Key header
  * - Validates it against the server's configured token
  * - Returns appropriate error responses for authentication failures
  * - Allows requests to proceed if authentication succeeds
@@ -23,18 +27,17 @@ import { logger } from "../utils/logger";
  * Create authentication middleware function
  *
  * This is a factory function that creates an Express middleware function for
- * bearer token authentication. The middleware validates that incoming requests
- * include a valid bearer token in the Authorization header.
+ * API key authentication. The middleware validates that incoming requests
+ * include a valid API key in the X-API-Key header.
  *
  * How it works:
- * 1. Extracts the Authorization header from the request
- * 2. Parses the bearer token from "Bearer <token>" format
- * 3. Compares the token against the server's configured token
- * 4. Rejects with 401/403 if invalid, allows if valid
+ * 1. Extracts the X-API-Key header from the request
+ * 2. Compares the API key against the server's configured token
+ * 3. Rejects with 401/403 if invalid, allows if valid
  *
- * @param authToken - The bearer token that clients must provide to authenticate
+ * @param authToken - The API key that clients must provide to authenticate
  *                    This should match the token configured on the server
- * @returns Express middleware function that validates bearer token authentication
+ * @returns Express middleware function that validates API key authentication
  *          The middleware calls next() if authentication succeeds, or sends an
  *          error response and stops processing if authentication fails
  */
@@ -54,45 +57,27 @@ export function createAuthMiddleware(authToken: string) {
     next: express.NextFunction
   ): void => {
     /**
-     * Extract the Authorization header from the request
+     * Extract the X-API-Key header from the request
      *
-     * The Authorization header should be in the format: "Bearer <token>"
-     * This is the standard HTTP bearer token authentication format.
+     * The X-API-Key header contains the API key directly (no "Bearer" prefix needed).
+     * This allows the Authorization header to be used for GCP IAM authentication
+     * while X-API-Key is used for application-level authentication.
      *
-     * If the header is not present, authHeader will be undefined.
-     * If the header is present but malformed, we'll handle it in the parsing step.
+     * If the header is not present, apiKey will be undefined.
      */
-    const authHeader = req.headers["authorization"];
+    const apiKey = req.headers["x-api-key"] as string | undefined;
 
     /**
-     * Split the header to extract just the token part
-     *
-     * The Authorization header format is: "Bearer <token>"
-     * We split on space to separate "Bearer" from the actual token.
-     *
-     * Examples:
-     * - "Bearer mytoken123" -> split(" ") -> ["Bearer", "mytoken123"] -> [1] = "mytoken123"
-     * - "Bearer" -> split(" ") -> ["Bearer"] -> [1] = undefined (missing token)
-     * - undefined -> undefined && ... -> undefined (no header)
-     *
-     * The && operator ensures we only call split() if authHeader exists.
-     * If authHeader is undefined, token will be undefined.
-     */
-    const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
-
-    /**
-     * Case 1: No token provided in the request
+     * Case 1: No API key provided in the request
      *
      * This handles the case where:
-     * - No Authorization header was provided
-     * - Authorization header was provided but doesn't contain "Bearer " prefix
-     * - Authorization header was provided but token part is missing (e.g., "Bearer ")
+     * - No X-API-Key header was provided
      *
-     * In all these cases, token will be undefined, and we reject the request
+     * In this case, apiKey will be undefined, and we reject the request
      * with a 401 Unauthorized error. This indicates the client needs to provide
      * credentials but hasn't done so.
      */
-    if (!token) {
+    if (!apiKey) {
       /**
        * Log the authentication failure for security monitoring
        *
@@ -106,7 +91,7 @@ export function createAuthMiddleware(authToken: string) {
        * - ip: Client IP address (for tracking and blocking malicious IPs)
        * - path: The endpoint that was accessed (to see what resources are being targeted)
        */
-      logger.warning("Authentication failed: Missing bearer token", {
+      logger.warning("Authentication failed: Missing API key", {
         component: "auth", // Identifies this as authentication-related logging
         ip: req.ip, // Log client IP for security tracking
         path: req.path, // Log which endpoint was accessed
@@ -131,7 +116,7 @@ export function createAuthMiddleware(authToken: string) {
         jsonrpc: "2.0", // JSON-RPC version
         error: {
           code: -32001, // Custom error code for missing auth token
-          message: "Unauthorized: Missing bearer token", // Human-readable error message
+          message: "Unauthorized: Missing API key", // Human-readable error message
         },
         id: null, // No request ID since this is a middleware-level error (before JSON-RPC parsing)
       });
@@ -139,30 +124,29 @@ export function createAuthMiddleware(authToken: string) {
     }
 
     /**
-     * Case 2: Token provided but doesn't match server's token
+     * Case 2: API key provided but doesn't match server's token
      *
      * This handles the case where:
-     * - Authorization header was provided with a token
-     * - The token was successfully extracted
-     * - But the token doesn't match the server's configured token
+     * - X-API-Key header was provided with a key
+     * - But the key doesn't match the server's configured token
      *
-     * This is different from Case 1 (no token) - here the client tried to
+     * This is different from Case 1 (no key) - here the client tried to
      * authenticate but provided incorrect credentials. We use 403 Forbidden
      * instead of 401 Unauthorized to indicate the difference.
      */
-    if (token !== authToken) {
+    if (apiKey !== authToken) {
       /**
        * Log the authentication failure
        *
-       * We log invalid token attempts for the same reasons as missing tokens:
+       * We log invalid key attempts for the same reasons as missing keys:
        * - Security monitoring (detect brute force attacks)
        * - Debugging (understand authentication issues)
        * - Auditing (track failed authentication attempts)
        *
-       * Note: We don't log the actual token values for security reasons
-       * (tokens are sensitive and shouldn't appear in logs).
+       * Note: We don't log the actual key values for security reasons
+       * (keys are sensitive and shouldn't appear in logs).
        */
-      logger.warning("Authentication failed: Invalid bearer token", {
+      logger.warning("Authentication failed: Invalid API key", {
         component: "auth", // Identifies this as authentication-related logging
         ip: req.ip, // Log client IP for security tracking
         path: req.path, // Log which endpoint was accessed
@@ -173,7 +157,7 @@ export function createAuthMiddleware(authToken: string) {
        *
        * We use 403 Forbidden because:
        * - The client provided credentials (unlike 401 where none were provided)
-       * - The credentials are invalid (wrong token)
+       * - The credentials are invalid (wrong key)
        * - The client is "forbidden" from accessing the resource with these credentials
        *
        * We use JSON-RPC error format for consistency with MCP protocol responses.
@@ -186,7 +170,7 @@ export function createAuthMiddleware(authToken: string) {
         jsonrpc: "2.0", // JSON-RPC version
         error: {
           code: -32002, // Custom error code for invalid auth token
-          message: "Forbidden: Invalid bearer token", // Human-readable error message
+          message: "Forbidden: Invalid API key", // Human-readable error message
         },
         id: null, // No request ID since this is a middleware-level error
       });
@@ -197,9 +181,8 @@ export function createAuthMiddleware(authToken: string) {
      * Case 3: Authentication successful
      *
      * If we reach this point, it means:
-     * - A token was provided in the Authorization header
-     * - The token was successfully extracted
-     * - The token matches the server's configured token
+     * - An API key was provided in the X-API-Key header
+     * - The API key matches the server's configured token
      *
      * At this point, authentication is complete and successful. We log the
      * success (for debugging) and then call next() to allow the request to

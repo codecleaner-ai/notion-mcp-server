@@ -34,9 +34,8 @@ steps:
         # Add the `DOCKER_IMAGE_PATH` value to the build_vars.env file
         echo "DOCKER_IMAGE_PATH=$${DOCKER_IMAGE_PATH}" >> build_vars.env
 
-        # DEBUG_MODE: Debug flag (from secret)
-        export DEBUG_MODE=$$(gcloud secrets versions access latest --secret=debug-mode-${_SERVICE_NAME})
-        echo "DEBUG_MODE=$$DEBUG_MODE" >> build_vars.env
+        # DEBUG_MODE: No longer needed here - now set as environment variable in deployment step
+        # Removed: DEBUG_MODE is now set as environment variable (not secret) for consistency with backend
 
         # API_VERSION: From Cloud Build substitution
         echo "API_VERSION=${_API_VERSION}" >> build_vars.env
@@ -123,8 +122,12 @@ steps:
         echo "Runtime Service Account: $${RUNTIME_SA_EMAIL}"
 
         # Define secret names (using PAT naming conventions)
-        DEBUG_MODE_SECRET_NAME="debug-mode-${_SERVICE_NAME}"
         AUTH_TOKEN_SECRET_NAME="notion-mcp-server-auth-token"
+
+        # DEBUG_MODE: Set as environment variable (not secret) for consistency with backend
+        # Default to "false" for production, can be overridden via --substitutions=_DEBUG_MODE=true
+        # Use substitution variable directly (Cloud Build validates substitution references)
+        RUNTIME_DEBUG_MODE="${_DEBUG_MODE}"
 
         # Verify image availability for deployment
         MAX_RETRIES=3
@@ -152,18 +155,43 @@ steps:
         fi
 
         # Deploy the image to Cloud Run
-        # Note: Internal-only service with --allow-unauthenticated (authentication handled at application level)
+        # CRITICAL: Deploy with IAM authentication required and ingress=all
+        # This allows backend to access via public internet while maintaining security
+        # Backend will pass GCP IAM identity token in Authorization: Bearer header
+        # Backend will also pass X-API-Key header for application-level authentication
         # Sanitize API version for revision suffix: replace dots with hyphens (Cloud Run only allows lowercase, digits, hyphens)
         REVISION_SUFFIX=$(echo "${_API_VERSION}" | tr '.' '-')
+
+        # CRITICAL: If DEBUG_MODE was previously set as a secret or env var with different type,
+        # we need to remove it first before setting it as an environment variable.
+        # Cloud Run doesn't allow changing the type of a configuration item.
+        # This won't fail if DEBUG_MODE doesn't exist.
+        echo "Removing DEBUG_MODE if it exists (migrating to environment variable)..."
+        # Remove as secret (if it exists)
+        gcloud run services update $${SERVICE_NAME} \
+          --project $${PROJECT_ID} \
+          --region $${REGION} \
+          --remove-secrets="DEBUG_MODE" \
+          2>/dev/null || echo "DEBUG_MODE secret not found - continuing..."
+        # Remove as env var (if it exists) - this ensures clean state
+        gcloud run services update $${SERVICE_NAME} \
+          --project $${PROJECT_ID} \
+          --region $${REGION} \
+          --remove-env-vars="DEBUG_MODE" \
+          2>/dev/null || echo "DEBUG_MODE env var not found - continuing..."
+
+        # Deploy with DEBUG_MODE as environment variable
+        # CRITICAL: Use --no-allow-unauthenticated (IAM auth required) and --ingress=all (allows backend access)
         gcloud run deploy $${SERVICE_NAME} \
           --image $${DOCKER_IMAGE_PATH} \
           --project $${PROJECT_ID} \
           --region $${REGION} \
           --platform managed \
-          --allow-unauthenticated \
-          --ingress=internal \
+          --no-allow-unauthenticated \
+          --ingress=all \
           --service-account "$${RUNTIME_SA_EMAIL}" \
-          --set-secrets="DEBUG_MODE=$${DEBUG_MODE_SECRET_NAME}:latest,AUTH_TOKEN=$${AUTH_TOKEN_SECRET_NAME}:latest" \
+          --set-secrets="AUTH_TOKEN=$${AUTH_TOKEN_SECRET_NAME}:latest" \
+          --set-env-vars="DEBUG_MODE=$${RUNTIME_DEBUG_MODE}" \
           --revision-suffix "$${REVISION_SUFFIX}"
 
         # Check if the deployment was successful
@@ -198,4 +226,10 @@ images:
 substitutions:
   _COMMIT_SHA: "${SHORT_SHA}"
   _SERVICE_NAME: "notion-mcp-server"
-  _API_VERSION: "v1.9.0"
+  # Default API version - can be overridden via --substitutions=_API_VERSION=<version>
+  # The single source of truth for the default version is codebase/notion-mcp-server/package.json
+  # NOTE: This is a fallback only - the deployment script reads from package.json and passes it here
+  _API_VERSION: "v1.10.2"
+  # Default DEBUG_MODE - can be overridden via --substitutions=_DEBUG_MODE=true
+  # Set as environment variable (not secret) for consistency with backend
+  _DEBUG_MODE: "false"
