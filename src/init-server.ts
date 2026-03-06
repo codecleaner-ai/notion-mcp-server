@@ -67,7 +67,7 @@ export class ValidationError extends Error {
  */
 async function loadOpenApiSpec(
   specPath: string,
-  baseUrl: string | undefined
+  baseUrl: string | undefined,
 ): Promise<OpenAPIV3.Document> {
   let rawSpec: string;
 
@@ -104,14 +104,14 @@ async function loadOpenApiSpec(
         component: "init",
         specPath, // Log the original path for debugging
       },
-      error as Error
+      error as Error,
     );
 
     // Also log to console for immediate visibility
     // Users need to see this error immediately to fix the issue
     console.error(
       "Failed to read OpenAPI specification file:",
-      (error as Error).message
+      (error as Error).message,
     );
 
     // Exit with error code 1 (failure)
@@ -170,7 +170,7 @@ async function loadOpenApiSpec(
       {
         component: "init",
       },
-      error as Error
+      error as Error,
     );
 
     // Also log to console for immediate visibility
@@ -216,7 +216,7 @@ export async function initProxy(specPath: string, baseUrl: string | undefined) {
   // ============================================================================
   // Log that we're starting the proxy initialization process
   // This helps with debugging and monitoring startup time
-  logger.info("Initializing MCP proxy", {
+  logger.debug("Initializing MCP proxy", {
     component: "init",
     specPath, // Log the spec path for debugging
     baseUrl: baseUrl || "default", // Log whether base URL override is used
@@ -250,7 +250,7 @@ export async function initProxy(specPath: string, baseUrl: string | undefined) {
   // ============================================================================
   // Log that the proxy was initialized successfully
   // This confirms that all tools were registered and the proxy is ready
-  logger.info("MCP proxy initialized successfully", {
+  logger.debug("MCP proxy initialized successfully", {
     component: "init",
   });
 

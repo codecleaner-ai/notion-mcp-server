@@ -312,7 +312,7 @@ export async function startServer(args: string[] = process.argv) {
        * We log that a token was generated so it's recorded in the log file.
        * This helps with debugging and auditing.
        */
-      logger.info("Generated new auth token", { component: "auth" });
+      logger.debug("Generated new auth token", { component: "auth" });
 
       /**
        * Also log to console for immediate visibility
@@ -327,7 +327,7 @@ export async function startServer(args: string[] = process.argv) {
        */
       console.log(`Generated auth token: ${authToken}`);
       console.log(
-        `Use this token in the Authorization header: Bearer ${authToken}`
+        `Use this token in the Authorization header: Bearer ${authToken}`,
       );
     } else {
       /**
@@ -485,7 +485,7 @@ export async function startServer(args: string[] = process.argv) {
         baseUrl, // Optional Notion API base URL override
         sessionManager, // Session manager instance
         initProxy, // Function to initialize MCP proxy
-      })
+      }),
     );
 
     /**
@@ -562,7 +562,7 @@ export async function startServer(args: string[] = process.argv) {
        *
        * This structured logging makes it easy to search and analyze server startup events.
        */
-      logger.info("MCP Server started", {
+      logger.debug("MCP Server started", {
         component: "server", // Identifies this as server startup logging
         transport: "http", // Transport mode
         port, // Port number
@@ -629,7 +629,7 @@ export async function startServer(args: string[] = process.argv) {
      * manually sets an invalid transport value, we catch it here.
      */
     throw new Error(
-      `Unsupported transport: ${transport}. Use 'stdio' or 'http'.`
+      `Unsupported transport: ${transport}. Use 'stdio' or 'http'.`,
     );
   }
 }
@@ -724,7 +724,7 @@ startServer(process.argv).catch((error) => {
       {
         component: "server", // Identifies this as server startup error
       },
-      error as Error // The actual error object (for stack trace)
+      error as Error, // The actual error object (for stack trace)
     );
 
     /**
